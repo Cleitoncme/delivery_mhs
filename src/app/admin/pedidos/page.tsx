@@ -1,1 +1,4 @@
-import {redirect} from "next/navigation";import{getAdminSession}from"@/lib/admin-auth";import{AdminView}from"@/features/admin/admin-view";import{AdminShell}from"@/features/admin/admin-shell";export default async function AdminOrdersPage(){if(!(await getAdminSession()))redirect("/admin/login");return <AdminShell><AdminView/></AdminShell>}
+import { redirect } from "next/navigation";
+export default function AdminOrdersPage() {
+  redirect("/admin");
+}

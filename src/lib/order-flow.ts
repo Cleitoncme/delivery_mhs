@@ -26,7 +26,3 @@ export function nextOrderStatus(
       return undefined;
   }
 }
-
-export function canCancelOrder(status: DeliveryOrderStatus) {
-  return status === "NEW" || status === "PREPARING" || status === "READY";
-}

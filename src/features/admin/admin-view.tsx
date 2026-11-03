@@ -53,20 +53,16 @@ const names = [
 export function AdminView() {
   const router = useRouter();
   const [page, setPage] = useState(0);
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<DeliveryOrderStatus | "">("");
   const { data, error, refresh } = useApiResource<{
     orders: Order[];
     hasMore: boolean;
     role: string;
-  }>(`/api/admin/pedidos?page=${page}&status=${encodeURIComponent(statusFilter)}&search=${encodeURIComponent(query)}`);
+  }>(`/api/admin/pedidos?page=${page}`);
   const orders = data?.orders ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = orders.find((order) => order.id === selectedId);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dropStatus, setDropStatus] = useState<DeliveryOrderStatus | null>(null);
   const nextStatus =
     selected && nextOrderStatus(selected.status, selected.fulfillmentType);
   async function transition() {
@@ -95,18 +91,7 @@ export function AdminView() {
       refresh();
     }
   }
-  async function dropOrder(status: DeliveryOrderStatus) {
-    const order = orders.find((item) => item.id === draggedId);
-    setDraggedId(null); setDropStatus(null);
-    if (!order || order.status === "NEW" || order.status === "CANCELED" || data?.role !== "OPERATOR") return;
-    const current = columns.findIndex((column) => column.status === order.status);
-    const target = columns.findIndex((column) => column.status === status);
-    if (target !== current + 1) return;
-    setBusy(true); setActionError("");
-    try { const response = await fetch(`/api/admin/pedidos/${order.id}/status`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({expectedStatus:order.status,status}) }); const result=await response.json(); if(!response.ok) throw new Error(result.error ?? "Falha ao mover pedido."); }
-    catch (cause) { setActionError(cause instanceof Error ? cause.message : "Falha de conexão."); }
-    finally { setBusy(false); refresh(); }
-  }
+  const [query, setQuery] = useState("");
   const visible = orders.filter((o) =>
     `${o.number} ${o.customer.name}`
       .toLowerCase()
@@ -190,13 +175,6 @@ export function AdminView() {
         )}
         {!data && !error && <p role="status">Carregando pedidos…</p>}
         <button onClick={refresh}>Atualizar pedidos</button>
-        <label className="admin-search">
-          Status
-          <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as DeliveryOrderStatus | ""); setPage(0); }}>
-            <option value="">Todos</option>
-            {columns.map((column) => <option value={column.status} key={column.status}>{column.label}</option>)}
-          </select>
-        </label>
         {data && orders.length === 0 && <p>Nenhum pedido nesta página.</p>}
         <label className="admin-search">
           <Search size={18} />
@@ -211,10 +189,7 @@ export function AdminView() {
           {columns.map((column) => {
             const list = visible.filter((o) => o.status === column.status);
             return (
-              <div className="kanban-column" key={column.status}
-                onDragEnter={() => setDropStatus(column.status)}
-                onDragOver={(event) => { if (dropStatus === column.status) event.preventDefault(); }}
-                onDrop={(event) => { event.preventDefault(); void dropOrder(column.status); }}>
+              <div className="kanban-column" key={column.status}>
                 <h2>
                   {column.label}
                   <span>{list.length}</span>
@@ -222,9 +197,6 @@ export function AdminView() {
                 {list.map((order) => (
                   <button
                     className="order-card"
-                    draggable={order.status !== "NEW" && order.status !== "CANCELED" && data?.role === "OPERATOR"}
-                    onDragStart={() => setDraggedId(order.id)}
-                    onDragEnd={() => { setDraggedId(null); setDropStatus(null); }}
                     key={order.id}
                     onClick={() => {
                       setSelectedId(order.id);
@@ -368,20 +340,6 @@ export function AdminView() {
                     : "Concluir pedido"}
               <ArrowRight size={17} />
             </button>
-          )}
-          {data?.role === "OPERATOR" && ["NEW", "PREPARING", "READY"].includes(selected.status) && (
-            <button className="secondary-button wide" disabled={busy} onClick={async () => {
-              const reason = window.prompt("Informe o motivo do cancelamento:");
-              if (!reason?.trim()) return;
-              setBusy(true); setActionError("");
-              try {
-                const response = await fetch(`/api/admin/pedidos/${selected.id}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.error ?? "Falha ao cancelar o pedido.");
-                setSelectedId(null);
-              } catch (cause) { setActionError(cause instanceof Error ? cause.message : "Falha de conexão."); }
-              finally { setBusy(false); refresh(); }
-            }}>Cancelar pedido</button>
           )}
         </aside>
       )}
