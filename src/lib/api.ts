@@ -1,4 +1,5 @@
 import { ZodError } from "zod";
+import { DomainError } from "@/domain/domain-error";
 
 export class ApiError extends Error {
   constructor(
@@ -23,6 +24,11 @@ export function errorResponse(error: unknown) {
     );
   if (error instanceof ApiError)
     return Response.json({ error: error.message }, { status: error.status });
+  if (error instanceof DomainError)
+    return Response.json(
+      { error: error.message, code: error.code },
+      { status: error.status },
+    );
   console.error("Erro de API", error);
   return Response.json(
     { error: "Não foi possível processar a solicitação." },

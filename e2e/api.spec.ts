@@ -63,3 +63,20 @@ test("API rejeita pedido sem chave de idempotência", async ({ request }) => {
   });
   expect(response.status()).toBe(400);
 });
+
+test("API limita abuso na criação pública de pedidos", async ({ request }) => {
+  const slug = `limite-${randomUUID()}`;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const response = await request.post(`/api/v1/lojas/${slug}/pedidos`, {
+      data: {},
+    });
+    expect(response.status()).toBe(400);
+  }
+  const blocked = await request.post(`/api/v1/lojas/${slug}/pedidos`, {
+    data: {},
+  });
+  expect(blocked.status()).toBe(429);
+  await expect(blocked.json()).resolves.toMatchObject({
+    code: "LIMITE_EXCEDIDO",
+  });
+});

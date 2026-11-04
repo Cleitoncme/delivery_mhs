@@ -11,6 +11,13 @@ Abrir http://127.0.0.1:3000/loja/mhs-mercado.
 
 Para preparar o banco local, siga [docs/BANCO_LOCAL.md](docs/BANCO_LOCAL.md).
 
+Depois de iniciar o PostgreSQL, execute as migrations versionadas:
+
+```sh
+npm run db:up
+npm run db:migrate
+```
+
 ```sh
 npm run typecheck
 npm run lint

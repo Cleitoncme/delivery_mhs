@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ApiError, errorResponse, jsonRequest } from "@/lib/api";
 import { createOrder, createOrderSchema } from "@/services/orders-db";
 import { grantOrderAccess } from "@/services/order-reader";
+import { enforcePublicOrderRateLimit } from "@/services/rate-limit-db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const slugSchema = z
@@ -15,6 +16,8 @@ export async function POST(
 ) {
   try {
     const { slug } = await context.params;
+    const validSlug = slugSchema.parse(slug);
+    await enforcePublicOrderRateLimit(validSlug, request);
     const idempotencyKey = idempotencySchema.safeParse(
       request.headers.get("idempotency-key"),
     );
@@ -24,7 +27,7 @@ export async function POST(
         "O cabeçalho Idempetency-Key com UUID é obrigatório.",
       );
     const order = await createOrder(
-      slugSchema.parse(slug),
+      validSlug,
       idempotencyKey.data,
       createOrderSchema.parse(await jsonRequest(request)),
     );

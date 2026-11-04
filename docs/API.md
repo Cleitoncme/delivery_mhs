@@ -25,6 +25,8 @@ O corpo inclui `customer`, `fulfillment`, `payment`, `items` e, para entrega, `a
 
 O endpoint não aceita preço, taxa, desconto, estoque ou total enviados pelo cliente. Ele bloqueia os produtos selecionados, valida disponibilidade e complementos, calcula o total no PostgreSQL, grava o histórico `NEW` e cria um evento `ORDER_CREATED` na outbox `integration_events`. A mesma chave retorna o pedido existente, sem criar uma segunda venda.
 
+A criação possui limite persistido por loja e endereço de origem, além de um teto global por loja. Ao exceder o limite, responde `429` com o código `LIMITE_EXCEDIDO`.
+
 A resposta de criação também emite um cookie HttpOnly para acompanhar aquele pedido durante sete dias. A chave de idempotência deve ser tratada como segredo da tentativa de compra: uma repetição com essa chave pode emitir outro acesso ao mesmo pedido.
 
 ## Acompanhamento
