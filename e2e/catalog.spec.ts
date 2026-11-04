@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 test("busca e categorias", async ({ page }) => {
   await page.goto("/");
+  const products = page.locator(".product-card");
+  await expect(products.first()).toBeVisible({ timeout: 30000 });
+  const productCount = await products.count();
+  expect(productCount).toBeGreaterThan(0);
+  await expect(page.locator(".product-card .add-symbol")).toHaveCount(
+    productCount,
+  );
   await page.getByRole("searchbox", { name: "Buscar produtos" }).fill("coca");
   await expect(page.locator(".product-card")).toHaveCount(2);
   await page

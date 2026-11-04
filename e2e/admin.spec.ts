@@ -56,6 +56,13 @@ test("painel autentica e cliente acompanha status real após recarregar", async 
     await page.getByLabel("Senha", { exact: true }).fill(shop.password);
     await page.getByRole("button", { name: "Entrar", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Pedidos", exact: true })).toBeVisible();
+    await expect(page.locator(".admin-sidebar a", { hasText: "Complementos" })).toHaveCount(1);
+    await expect(page.locator("nav.catalog-actions")).toHaveCount(0);
+    const columnLayout = await page.locator(".kanban-column").first().evaluate((column) => ({
+      overflowY: getComputedStyle(column).overflowY,
+      headingPosition: getComputedStyle(column.querySelector("h2")!).position,
+    }));
+    expect(columnLayout).toEqual({ overflowY: "auto", headingPosition: "sticky" });
     await page.getByRole("button", { name: new RegExp(`#${created.number}`) }).click();
     await page.getByRole("button", { name: "Aceitar pedido" }).click();
     await expect(tracking.getByRole("status")).toContainText("Em separação", { timeout: 20000 });
