@@ -1,6 +1,5 @@
 "use client";
 import Link from "next/link";
-import { Plus } from "lucide-react";
 import { ProductArt } from "./product-art";
 import { money } from "@/lib/format";
 import type { Product } from "@/types/domain";
@@ -45,7 +44,7 @@ export function ProductCard({
               href={href}
               aria-label={`Configurar ${product.name}`}
             >
-              <Plus size={18} />
+              <span className="add-symbol" aria-hidden="true">+</span>
             </Link>
           ) : (
             <button
@@ -60,7 +59,7 @@ export function ProductCard({
                 })
               }
             >
-              <Plus size={18} />
+              <span className="add-symbol" aria-hidden="true">+</span>
             </button>
           )}
         </div>

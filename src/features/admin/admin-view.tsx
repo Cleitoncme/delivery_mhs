@@ -7,6 +7,7 @@ import {
   ClipboardList,
   Package,
   Tags,
+  Blocks,
   Users,
   Ticket,
   ChartNoAxesCombined,
@@ -33,6 +34,7 @@ const nav = [
   ClipboardList,
   Package,
   Tags,
+  Blocks,
   Users,
   Ticket,
   ChartNoAxesCombined,
@@ -44,6 +46,7 @@ const names = [
   "Pedidos",
   "Produtos",
   "Categorias",
+  "Complementos",
   "Clientes",
   "Cupons",
   "Relatórios",
@@ -117,7 +120,9 @@ export function AdminView() {
                       ? "/admin/produtos"
                       : name === "Categorias"
                         ? "/admin/categorias"
-                        : "#"
+                        : name === "Complementos"
+                          ? "/admin/complementos"
+                          : "#"
                 }
                 className={name === "Pedidos" ? "active" : ""}
                 key={name}
@@ -131,11 +136,7 @@ export function AdminView() {
         <small>Gestão de pedidos</small>
       </aside>
       <main id="main" className="admin-main">
-        <nav className="catalog-actions" aria-label="Catálogo administrativo">
-          <Link href="/admin/produtos">Produtos</Link>
-          <Link href="/admin/categorias">Categorias</Link>
-          <Link href="/admin/complementos">Complementos</Link>
-        </nav>
+        <div className="admin-panel-header">
         <header>
           <div>
             <span className="eyebrow">PAINEL ADMINISTRATIVO</span>
@@ -185,6 +186,7 @@ export function AdminView() {
             aria-label="Buscar pedidos"
           />
         </label>
+        </div>
         <section id="pedidos" className="kanban">
           {columns.map((column) => {
             const list = visible.filter((o) => o.status === column.status);
