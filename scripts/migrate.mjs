@@ -15,12 +15,19 @@ const migrations = readdirSync(directory)
   .filter((file) => /^\d{3}_[a-z0-9_]+\.sql$/.test(file))
   .sort()
   .map((file) => {
-    const sql = readFileSync(join(directory, file), "utf8");
+    // Git may check out SQL as CRLF on Windows. Hash normalized content so the
+    // same immutable migration has one checksum on local machines and Linux.
+    const rawSql = readFileSync(join(directory, file), "utf8");
+    const sql = rawSql.replace(/\r\n/g, "\n");
     return {
       version: Number(file.slice(0, 3)),
       file,
       sql,
       checksum: createHash("sha256").update(sql).digest("hex"),
+      compatibleChecksums: new Set([
+        createHash("sha256").update(rawSql).digest("hex"),
+        createHash("sha256").update(sql).digest("hex"),
+      ]),
     };
   });
 
@@ -54,7 +61,7 @@ try {
     if (existing) {
       if (
         existing.filename !== migration.file ||
-        existing.checksum.trim() !== migration.checksum
+        !migration.compatibleChecksums.has(existing.checksum.trim())
       ) throw new Error(`${migration.file} foi alterada depois de aplicada.`);
       console.log(`Já aplicada: ${migration.file}`);
       continue;

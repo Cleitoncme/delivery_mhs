@@ -27,11 +27,29 @@ const orderSelect = `SELECT jsonb_build_object(
 ) AS data FROM orders o JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id
 LEFT JOIN addresses a ON a.id=o.address_id AND a.tenant_id=o.tenant_id`;
 
-export async function listAdminOrders(page: number) {
+export async function listAdminOrders(
+  page: number,
+  filters: {
+    date: string;
+    days: 1 | 7;
+    status?: DeliveryOrderStatus;
+  },
+) {
   const session = await requireAdmin();
   const result = await query<{ data: Order }>(
-    `${orderSelect} WHERE o.tenant_id=$1 ORDER BY o.created_at DESC,o.id DESC LIMIT 51 OFFSET $2`,
-    [session.tenantId, page * 50],
+    `${orderSelect} WHERE o.tenant_id=$1
+     AND ($2::order_status IS NULL OR o.status=$2::order_status)
+     AND (o.status IN ('NEW','PREPARING','READY','OUT_FOR_DELIVERY') OR
+       (o.created_at >= (($3::date - ($4::integer - 1))::timestamp AT TIME ZONE 'America/Sao_Paulo')
+        AND o.created_at < (($3::date + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo')))
+     ORDER BY o.created_at DESC,o.id DESC LIMIT 51 OFFSET $5`,
+    [
+      session.tenantId,
+      filters.status ?? null,
+      filters.date,
+      filters.days,
+      page * 50,
+    ],
   );
   return {
     orders: result.rows.slice(0, 50).map((r) => r.data),

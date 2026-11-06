@@ -790,6 +790,10 @@ p {
     font-size: 28px;
   }
 }
+.order-card[draggable="true"] { cursor:grab; }
+.order-card[draggable="true"]:active { cursor:grabbing; }
+.order-card.moving { opacity:.55; pointer-events:none; }
+.kanban-column.drop-target { outline:3px dashed var(--primary); outline-offset:-3px; background:#f4dfe2; }
 @media (max-width: 767px) {
   .two-fields,
   .method-grid,
@@ -1547,4 +1551,27 @@ p {
   .kanban-column {
     height: 100%;
   }
+}
+@media (min-width:768px) and (max-width:1439px) {
+  .admin-layout { grid-template-columns:205px minmax(0,1fr); }
+  .admin-sidebar { padding:20px 12px; }
+  .admin-sidebar .brand { margin-bottom:22px; }
+  .admin-sidebar nav a { gap:9px; padding:8px; font-size:12px; }
+  .admin-main { padding:12px 18px; }
+  .admin-main h1 { font-size:clamp(32px,3vw,38px); }
+  .admin-panel-header .demo-notice { padding:8px 10px; margin-bottom:0; }
+  .admin-panel-header > button { min-height:40px; padding:8px 16px; }
+  .admin-panel-header .admin-search { margin:10px 0 12px; padding:9px 11px; }
+  .kanban { grid-template-columns:repeat(6,minmax(158px,1fr)); gap:10px; }
+  .kanban-column { padding:10px; border-radius:10px; }
+  .kanban-column h2 { top:-10px; margin:-10px -10px 10px; padding:10px; }
+  .order-card { padding:10px; margin:7px 0; }
+}
+.admin-filters { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; margin:10px 0 12px; }
+.admin-filters .admin-search { flex:1 1 300px; margin:0; }
+.admin-filter { display:grid; gap:3px; min-width:170px; color:var(--muted); font-size:10px; font-weight:700; }
+.admin-filter select,.admin-filter input { height:44px; min-width:0; border:1px solid var(--line); border-radius:9px; background:white; color:var(--ink); padding:0 11px; font-size:12px; }
+@media (max-width:767px) {
+  .admin-filters { align-items:stretch; }
+  .admin-filters .admin-search,.admin-filter { flex:1 1 100%; width:100%; }
 }

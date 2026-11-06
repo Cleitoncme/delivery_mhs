@@ -1,5 +1,17 @@
 import type { DeliveryOrderStatus, FulfillmentType } from "@/types/domain";
 
+type NumberedOrder = { number: string; createdAt: string };
+
+export function compareOrdersByNumber(
+  first: NumberedOrder,
+  second: NumberedOrder,
+) {
+  const numberDifference = Number(first.number) - Number(second.number);
+  if (Number.isFinite(numberDifference) && numberDifference !== 0)
+    return numberDifference;
+  return new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime();
+}
+
 export const orderStatusNames: Record<DeliveryOrderStatus, string> = {
   NEW: "Pedido recebido",
   PREPARING: "Em separação",
