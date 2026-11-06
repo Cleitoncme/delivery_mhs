@@ -56,6 +56,11 @@ test("painel autentica e cliente acompanha status real após recarregar", async 
     await page.getByLabel("Senha", { exact: true }).fill(shop.password);
     await page.getByRole("button", { name: "Entrar", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Pedidos", exact: true })).toBeVisible();
+    await expect(page.getByLabel("Filtrar pedidos por período")).toHaveValue("TODAY");
+    await expect(page.getByLabel("Filtrar pedidos por status")).toHaveValue("ALL");
+    await expect(
+      page.getByRole("navigation", { name: "Páginas de pedidos" }),
+    ).toHaveCount(0);
     await expect(page.locator(".admin-sidebar a", { hasText: "Complementos" })).toHaveCount(1);
     await expect(page.locator("nav.catalog-actions")).toHaveCount(0);
     const columnLayout = await page.locator(".kanban-column").first().evaluate((column) => ({
@@ -63,6 +68,12 @@ test("painel autentica e cliente acompanha status real após recarregar", async 
       headingPosition: getComputedStyle(column.querySelector("h2")!).position,
     }));
     expect(columnLayout).toEqual({ overflowY: "auto", headingPosition: "sticky" });
+    if ((page.viewportSize()?.width ?? 0) >= 1200) {
+      const kanbanFits = await page.locator(".kanban").evaluate(
+        (kanban) => kanban.scrollWidth <= kanban.clientWidth + 1,
+      );
+      expect(kanbanFits).toBe(true);
+    }
     await page.getByRole("button", { name: new RegExp(`#${created.number}`) }).click();
     await page.getByRole("button", { name: "Aceitar pedido" }).click();
     await expect(tracking.getByRole("status")).toContainText("Em separação", { timeout: 20000 });
@@ -74,6 +85,37 @@ test("painel autentica e cliente acompanha status real após recarregar", async 
     await expect(page).toHaveURL(/\/admin\/login$/);
     expect((await page.request.get("/api/admin/pedidos")).status()).toBe(401);
   } finally { await customer.close(); }
+});
+test("kanban bloqueia novos e avança apenas para a próxima etapa", async ({ page, shop }, testInfo) => {
+  const created = await order(page.request, shop);
+  await login(page.request, shop);
+  await page.goto("/admin/pedidos");
+  const card = page.getByRole("button", { name: new RegExp(`#${created.number}`) });
+  await expect(card).toHaveAttribute("draggable", "false");
+  await card.click();
+  await page.getByRole("button", { name: "Aceitar pedido" }).click();
+  const preparing = page.locator('[data-status="PREPARING"]');
+  const ready = page.locator('[data-status="READY"]');
+  const preparingCard = preparing.getByRole("button", {
+    name: new RegExp(`#${created.number}`),
+  });
+  await expect(preparingCard).toHaveAttribute("draggable", "true");
+  if (testInfo.project.name === "mobile") {
+    await preparingCard.click();
+    await page.getByRole("button", { name: "Marcar como pronto" }).click();
+  } else {
+    await preparingCard.dragTo(ready);
+  }
+  await expect.poll(async () => {
+    const saved = await shop.pool.query(
+      "SELECT status FROM orders WHERE id=$1",
+      [created.id],
+    );
+    return saved.rows[0]?.status;
+  }).toBe("READY");
+  await expect(
+    ready.getByRole("button", { name: new RegExp(`#${created.number}`) }),
+  ).toBeVisible();
 });
 test("API bloqueia anônimo, origem externa, consulta e sessão expirada", async ({ request, shop }) => {
   expect((await request.get("/api/admin/pedidos")).status()).toBe(401);
@@ -87,6 +129,37 @@ test("API bloqueia anônimo, origem externa, consulta e sessão expirada", async
   expect((await request.patch(path, { data, headers: { Origin: origin } })).status()).toBe(403);
   await shop.pool.query("UPDATE admin_sessions SET expires_at=now()-interval '1 second' WHERE user_id=$1", [shop.userId]);
   expect((await request.get("/api/admin/pedidos")).status()).toBe(401);
+});
+test("filtro preserva pendentes antigos e limita concluídos pela data", async ({ request, shop }) => {
+  const created = await order(request, shop);
+  await login(request, shop);
+  await shop.pool.query(
+    "UPDATE orders SET created_at=now()-interval '10 days' WHERE id=$1",
+    [created.id],
+  );
+  const today = await request.get("/api/admin/pedidos");
+  expect(today.status()).toBe(200);
+  expect((await today.json()).orders.map((item: { id: string }) => item.id)).toContain(created.id);
+  const change = (expectedStatus: string, status: string) =>
+    request.patch(`/api/admin/pedidos/${created.id}/status`, {
+      headers: { Origin: origin },
+      data: { expectedStatus, status },
+    });
+  for (const [from, to] of [["NEW", "PREPARING"], ["PREPARING", "READY"], ["READY", "COMPLETED"]])
+    expect((await change(from, to)).status()).toBe(200);
+  const currentDay = await (await request.get("/api/admin/pedidos")).json();
+  expect(currentDay.orders.map((item: { id: string }) => item.id)).not.toContain(created.id);
+  const oldDate = (
+    await shop.pool.query<{ date: string }>(
+      "SELECT to_char((created_at AT TIME ZONE 'America/Sao_Paulo')::date,'YYYY-MM-DD') date FROM orders WHERE id=$1",
+      [created.id],
+    )
+  ).rows[0].date;
+  const historical = await (
+    await request.get(`/api/admin/pedidos?date=${oldDate}&status=COMPLETED`)
+  ).json();
+  expect(historical.orders.map((item: { id: string }) => item.id)).toContain(created.id);
+  expect((await request.get("/api/admin/pedidos?status=INVALID")).status()).toBe(400);
 });
 test("acompanhamento exige cookie e administrador só acessa sua loja", async ({ request, playwright, shop }) => {
   const created = await order(request, shop), path = `/api/v1/lojas/${shop.slug}/pedidos/${created.id}`;
