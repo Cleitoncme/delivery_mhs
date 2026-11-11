@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { errorResponse } from "@/lib/api";
+import { todayInShopTimeZone } from "@/lib/shop-date";
 import { listAdminOrders } from "@/services/order-reader";
 export const runtime = "nodejs";
 const status = z.enum([
@@ -10,16 +11,6 @@ const status = z.enum([
   "COMPLETED",
   "CANCELED",
 ]);
-function todayInShopTimeZone() {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Sao_Paulo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${value.year}-${value.month}-${value.day}`;
-}
 export async function GET(request: Request) {
   try {
     const searchParams = new URL(request.url).searchParams;

@@ -1,22 +1,12 @@
 "use client";
 import { useState, type DragEvent } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  LayoutDashboard,
-  ClipboardList,
-  Package,
-  Tags,
-  Blocks,
-  Users,
-  Ticket,
-  ChartNoAxesCombined,
-  Settings,
-  Plug,
   X,
   ArrowRight,
   Search,
 } from "lucide-react";
+import { AdminSidebar } from "./admin-sidebar";
 import { useApiResource } from "@/lib/use-api-resource";
 import {
   compareOrdersByNumber,
@@ -32,30 +22,6 @@ const columns: { status: DeliveryOrderStatus; label: string }[] = [
   { status: "OUT_FOR_DELIVERY", label: "Em entrega" },
   { status: "COMPLETED", label: "Concluídos" },
   { status: "CANCELED", label: "Cancelados" },
-];
-const nav = [
-  LayoutDashboard,
-  ClipboardList,
-  Package,
-  Tags,
-  Blocks,
-  Users,
-  Ticket,
-  ChartNoAxesCombined,
-  Settings,
-  Plug,
-];
-const names = [
-  "Visão geral",
-  "Pedidos",
-  "Produtos",
-  "Categorias",
-  "Complementos",
-  "Clientes",
-  "Cupons",
-  "Relatórios",
-  "Configurações",
-  "Integrações",
 ];
 type OrderPeriod = "TODAY" | "YESTERDAY" | "LAST_7_DAYS" | "CUSTOM";
 type OrderStatusFilter = "ALL" | DeliveryOrderStatus;
@@ -170,39 +136,7 @@ export function AdminView({ initialDate }: { initialDate: string }) {
   );
   return (
     <div className="admin-layout">
-      <aside className="admin-sidebar">
-        <Link href="/admin" className="brand">
-          <span className="brand-mark">
-            mhs<span>●</span>
-          </span>
-        </Link>
-        <nav>
-          {names.map((name, i) => {
-            const Icon = nav[i];
-            return (
-              <a
-                href={
-                  name === "Pedidos"
-                    ? "#pedidos"
-                    : name === "Produtos"
-                      ? "/admin/produtos"
-                      : name === "Categorias"
-                        ? "/admin/categorias"
-                        : name === "Complementos"
-                          ? "/admin/complementos"
-                          : "#"
-                }
-                className={name === "Pedidos" ? "active" : ""}
-                key={name}
-              >
-                <Icon size={19} />
-                {name}
-              </a>
-            );
-          })}
-        </nav>
-        <small>Gestão de pedidos</small>
-      </aside>
+      <AdminSidebar active="Pedidos" />
       <main id="main" className="admin-main">
         <div className="admin-panel-header">
         <header>

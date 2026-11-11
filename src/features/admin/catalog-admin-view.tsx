@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-import Link from "next/link";
 import { useApiResource } from "@/lib/use-api-resource";
 import { money } from "@/lib/format";
 import {
@@ -11,6 +10,7 @@ import {
   type CatalogResource,
 } from "@/lib/catalog-admin-schema";
 import { fields, resourceNames, optionLabels } from "./catalog-fields";
+import { AdminSidebar } from "./admin-sidebar";
 
 export function CatalogAdminView({
   initialResource,
@@ -36,14 +36,16 @@ export function CatalogAdminView({
     Math.max(0, Math.ceil(rows.length / 20) - 1),
   );
   const writable = data?.role === "OPERATOR";
+  const active =
+    initialResource === "produtos"
+      ? "Produtos"
+      : initialResource === "categorias"
+        ? "Categorias"
+        : "Complementos";
   return (
-    <main id="main" className="container store-main catalog-admin">
-      <nav aria-label="Administração">
-        <Link href="/admin">Pedidos</Link>
-        <Link href="/admin/produtos">Produtos</Link>
-        <Link href="/admin/categorias">Categorias</Link>
-        <Link href="/admin/complementos">Complementos</Link>
-      </nav>
+    <div className="admin-layout">
+      <AdminSidebar active={active} />
+      <main id="main" className="admin-main catalog-admin catalog-admin-main">
       <h1>{resourceNames[resource]}</h1>
       {(initialResource === "grupos" || initialResource === "complementos") && (
         <div className="catalog-actions">
@@ -181,7 +183,8 @@ export function CatalogAdminView({
           )}
         </>
       )}
-    </main>
+      </main>
+    </div>
   );
 }
 function CatalogEditor({

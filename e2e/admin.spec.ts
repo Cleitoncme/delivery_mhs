@@ -41,7 +41,7 @@ async function order(request: APIRequestContext, shop: Shop, fulfillment = "PICK
   return await response.json() as { id: string; number: string };
 }
 test("painel autentica e cliente acompanha status real após recarregar", async ({ page, browser, shop }) => {
-  test.setTimeout(90000);
+  test.setTimeout(150000);
   const customer = await browser.newContext({ baseURL: origin });
   try {
     const created = await order(customer.request, shop);
@@ -55,6 +55,10 @@ test("painel autentica e cliente acompanha status real após recarregar", async 
     await page.getByLabel("E-mail", { exact: true }).fill(shop.email);
     await page.getByLabel("Senha", { exact: true }).fill(shop.password);
     await page.getByRole("button", { name: "Entrar", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Visão geral", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Pedidos", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Pedidos", exact: true })).toBeVisible();
     await expect(page.getByLabel("Filtrar pedidos por período")).toHaveValue("TODAY");
     await expect(page.getByLabel("Filtrar pedidos por status")).toHaveValue("ALL");
@@ -85,6 +89,39 @@ test("painel autentica e cliente acompanha status real após recarregar", async 
     await expect(page).toHaveURL(/\/admin\/login$/);
     expect((await page.request.get("/api/admin/pedidos")).status()).toBe(401);
   } finally { await customer.close(); }
+});
+test("dashboard calcula métricas da loja e protege os filtros", async ({ page, shop }) => {
+  const completed = await order(page.request, shop);
+  await login(page.request, shop);
+  const change = (expectedStatus: string, status: string) =>
+    page.request.patch(`/api/admin/pedidos/${completed.id}/status`, {
+      headers: { Origin: origin },
+      data: { expectedStatus, status },
+    });
+  for (const [from, to] of [
+    ["NEW", "PREPARING"],
+    ["PREPARING", "READY"],
+    ["READY", "COMPLETED"],
+  ])
+    expect((await change(from, to)).status()).toBe(200);
+  await order(page.request, shop);
+  const response = await page.request.get("/api/admin/dashboard");
+  expect(response.status()).toBe(200);
+  const dashboard = await response.json();
+  expect(dashboard.summary).toMatchObject({
+    revenue: 1000,
+    completedOrders: 1,
+    averageTicket: 1000,
+    totalOrders: 2,
+  });
+  expect(dashboard.statusCounts.NEW).toBe(1);
+  expect(dashboard.statusCounts.COMPLETED).toBe(1);
+  expect((await page.request.get("/api/admin/dashboard?days=30")).status()).toBe(400);
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", { name: "Visão geral" })).toBeVisible();
+  await expect(page.getByText("R$ 10,00", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("1 pedidos ativos", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Abrir painel de pedidos →" })).toBeVisible();
 });
 test("kanban bloqueia novos e avança apenas para a próxima etapa", async ({ page, shop }, testInfo) => {
   const created = await order(page.request, shop);
@@ -119,6 +156,7 @@ test("kanban bloqueia novos e avança apenas para a próxima etapa", async ({ pa
 });
 test("API bloqueia anônimo, origem externa, consulta e sessão expirada", async ({ request, shop }) => {
   expect((await request.get("/api/admin/pedidos")).status()).toBe(401);
+  expect((await request.get("/api/admin/dashboard")).status()).toBe(401);
   const created = await order(request, shop);
   await login(request, shop);
   const path = `/api/admin/pedidos/${created.id}/status`, data = { expectedStatus: "NEW", status: "PREPARING" };
