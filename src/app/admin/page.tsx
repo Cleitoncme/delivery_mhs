@@ -1,7 +1,8 @@
-import { AdminView } from "@/features/admin/admin-view";
 import { redirect } from "next/navigation";
 import { getAdminSession } from "@/lib/admin-auth";
+import { todayInShopTimeZone } from "@/lib/shop-date";
+import { DashboardView } from "@/features/admin/dashboard-view";
 export default async function AdminPage() {
   if (!(await getAdminSession())) redirect("/admin/login");
-  return <AdminView />;
+  return <DashboardView initialDate={todayInShopTimeZone()} />;
 }
