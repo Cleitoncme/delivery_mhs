@@ -123,6 +123,44 @@ test("dashboard calcula métricas da loja e protege os filtros", async ({ page, 
   await expect(page.getByText("1 pedidos ativos", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Abrir painel de pedidos →" })).toBeVisible();
 });
+test("clientes exibe contatos, métricas e histórico somente da loja", async ({ page, shop }) => {
+  const completed = await order(page.request, shop);
+  await order(page.request, shop, "DELIVERY");
+  await login(page.request, shop);
+  const change = (expectedStatus: string, status: string) =>
+    page.request.patch(`/api/admin/pedidos/${completed.id}/status`, {
+      headers: { Origin: origin },
+      data: { expectedStatus, status },
+    });
+  for (const [from, to] of [["NEW", "PREPARING"], ["PREPARING", "READY"], ["READY", "COMPLETED"]])
+    expect((await change(from, to)).status()).toBe(200);
+
+  const listResponse = await page.request.get("/api/admin/clientes?q=Cliente%20Teste");
+  expect(listResponse.status()).toBe(200);
+  const list = await listResponse.json();
+  expect(list.customers).toHaveLength(1);
+  expect(list.customers[0]).toMatchObject({
+    name: "Cliente Teste",
+    phone: "49999999999",
+    orderCount: 2,
+    completedOrders: 1,
+    totalSpent: 1000,
+  });
+  const customerId = list.customers[0].id as string;
+  const detail = await (await page.request.get(`/api/admin/clientes/${customerId}`)).json();
+  expect(detail.orders).toHaveLength(2);
+  expect(detail.addresses).toHaveLength(1);
+  expect(detail.summary).toMatchObject({ orderCount: 2, completedOrders: 1, totalSpent: 1000, averageTicket: 1000 });
+  expect((await page.request.get("/api/admin/clientes/00000000-0000-4000-8000-000000000000")).status()).toBe(404);
+
+  await page.goto("/admin/clientes");
+  await expect(page.getByRole("heading", { name: "Clientes", exact: true })).toBeVisible();
+  await page.getByPlaceholder("Buscar por nome, telefone ou e-mail").fill("49999999999");
+  await page.getByRole("button", { name: /Cliente Teste/ }).click();
+  await expect(page.getByRole("heading", { name: "Cliente Teste" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Histórico de pedidos" })).toBeVisible();
+  await expect(page.locator(".customer-detail").getByText("R$ 10,00", { exact: true }).first()).toBeVisible();
+});
 test("kanban bloqueia novos e avança apenas para a próxima etapa", async ({ page, shop }, testInfo) => {
   const created = await order(page.request, shop);
   await login(page.request, shop);
@@ -157,6 +195,7 @@ test("kanban bloqueia novos e avança apenas para a próxima etapa", async ({ pa
 test("API bloqueia anônimo, origem externa, consulta e sessão expirada", async ({ request, shop }) => {
   expect((await request.get("/api/admin/pedidos")).status()).toBe(401);
   expect((await request.get("/api/admin/dashboard")).status()).toBe(401);
+  expect((await request.get("/api/admin/clientes")).status()).toBe(401);
   const created = await order(request, shop);
   await login(request, shop);
   const path = `/api/admin/pedidos/${created.id}/status`, data = { expectedStatus: "NEW", status: "PREPARING" };
@@ -209,10 +248,13 @@ test("acompanhamento exige cookie e administrador só acessa sua loja", async ({
     expect(await own.json()).not.toHaveProperty("customer");
     expect((await request.get(`/api/v1/lojas/mhs-mercado/pedidos/${created.id}`)).status()).toBe(404);
     await login(request, shop);
+    const ownCustomers = await (await request.get("/api/admin/clientes")).json();
+    const ownCustomerId = ownCustomers.customers[0].id as string;
     const otherId = (await shop.pool.query("SELECT id FROM tenants WHERE slug='mhs-mercado'")).rows[0].id;
     await shop.pool.query("UPDATE admin_users SET tenant_id=$1 WHERE id=$2", [otherId, shop.userId]);
     const list = await (await request.get("/api/admin/pedidos")).json();
     expect(list.orders.every((item: { tenantId: string }) => item.tenantId === otherId)).toBe(true);
+    expect((await request.get(`/api/admin/clientes/${ownCustomerId}`)).status()).toBe(404);
     expect((await request.patch(`/api/admin/pedidos/${created.id}/status`, { headers: { Origin: origin }, data: { expectedStatus: "NEW", status: "PREPARING" } })).status()).toBe(404);
   } finally { await stranger.dispose(); }
 });
