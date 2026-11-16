@@ -1,31 +1,33 @@
 "use client";
 import { useEffect, useState } from "react";
 
-export function useApiResource<T>(url: string, interval = 10000) {
+export function useApiResource<T>(url: string | null, interval = 10000) {
   const [result, setResult] = useState<{
-    url: string;
+    url: string | null;
     data?: T;
     error?: string;
   }>({ url });
   const [revision, setRevision] = useState(0);
   useEffect(() => {
+    if (!url) return;
+    const requestUrl = url;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const controller = new AbortController();
     async function load() {
       try {
-        const response = await fetch(url, {
+        const response = await fetch(requestUrl, {
           cache: "no-store",
           signal: controller.signal,
         });
         const data = await response.json();
         if (!response.ok)
           throw new Error(data.error ?? "Não foi possível carregar os dados.");
-        if (!disposed) setResult({ url, data });
+        if (!disposed) setResult({ url: requestUrl, data });
       } catch (error) {
         if (!disposed)
           setResult({
-            url,
+            url: requestUrl,
             error: error instanceof Error ? error.message : "Falha de conexão.",
           });
       } finally {
