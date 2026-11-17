@@ -89,6 +89,7 @@ export type DeliveryOrderStatus =
   | "CANCELED";
 export type FulfillmentType = "DELIVERY" | "PICKUP";
 export type PaymentMethod = "PIX" | "CARD_ON_DELIVERY" | "CASH";
+export type CancellationReason = import("@/lib/order-cancellation").CancellationReason;
 export interface Order {
   id: string;
   tenantId: string;
@@ -107,4 +108,10 @@ export interface Order {
   status: DeliveryOrderStatus;
   createdAt: string;
   history: { status: DeliveryOrderStatus; at: string }[];
+  cancellation?: {
+    reason: CancellationReason;
+    note?: string;
+    previousStatus?: DeliveryOrderStatus;
+    at: string;
+  };
 }

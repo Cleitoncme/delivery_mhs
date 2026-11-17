@@ -2,6 +2,7 @@
 import { useState, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Ban,
   X,
   ArrowRight,
   Search,
@@ -14,6 +15,10 @@ import {
   orderStatusNames,
 } from "@/lib/order-flow";
 import { money } from "@/lib/format";
+import {
+  cancellationReasons,
+  type CancellationReason,
+} from "@/lib/order-cancellation";
 import type { DeliveryOrderStatus, Order } from "@/types/domain";
 const columns: { status: DeliveryOrderStatus; label: string }[] = [
   { status: "NEW", label: "Novos" },
@@ -78,6 +83,10 @@ export function AdminView({ initialDate }: { initialDate: string }) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropStatus, setDropStatus] = useState<DeliveryOrderStatus | null>(null);
   const [actionError, setActionError] = useState("");
+  const [cancelMode, setCancelMode] = useState(false);
+  const [cancelReason, setCancelReason] =
+    useState<CancellationReason>("OUT_OF_STOCK");
+  const [cancelNote, setCancelNote] = useState("");
   const nextStatus =
     selected && nextOrderStatus(selected.status, selected.fulfillmentType);
   async function transitionOrder(
@@ -127,6 +136,44 @@ export function AdminView({ initialDate }: { initialDate: string }) {
   async function transition() {
     if (!selected || !nextStatus) return;
     await transitionOrder(selected, nextStatus, true);
+  }
+  async function cancelSelectedOrder() {
+    if (
+      !selected ||
+      busy ||
+      selected.status === "COMPLETED" ||
+      selected.status === "CANCELED"
+    )
+      return;
+    setBusy(true);
+    setActionError("");
+    try {
+      const response = await fetch(
+        `/api/admin/pedidos/${selected.id}/cancelamento`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedStatus: selected.status,
+            reason: cancelReason,
+            note: cancelNote.trim() || undefined,
+          }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error ?? "Falha ao cancelar o pedido.");
+      setSelectedId(null);
+      setCancelMode(false);
+      setCancelNote("");
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : "Falha de conexão.",
+      );
+    } finally {
+      setBusy(false);
+      refresh();
+    }
   }
   const [query, setQuery] = useState("");
   const visible = visibleOrders.filter((o) =>
@@ -307,6 +354,8 @@ export function AdminView({ initialDate }: { initialDate: string }) {
                     onClick={() => {
                       setSelectedId(order.id);
                       setActionError("");
+                      setCancelMode(false);
+                      setCancelNote("");
                     }}
                   >
                     <strong>#{order.number}</strong>
@@ -432,6 +481,13 @@ export function AdminView({ initialDate }: { initialDate: string }) {
               </li>
             ))}
           </ul>
+          {selected.cancellation && (
+            <div className="cancellation-summary">
+              <strong>Motivo do cancelamento</strong>
+              <span>{cancellationReasons[selected.cancellation.reason]}</span>
+              {selected.cancellation.note && <small>{selected.cancellation.note}</small>}
+            </div>
+          )}
           {nextStatus && data?.role === "OPERATOR" && (
             <button
               className="wide"
@@ -449,6 +505,65 @@ export function AdminView({ initialDate }: { initialDate: string }) {
               <ArrowRight size={17} />
             </button>
           )}
+          {data?.role === "OPERATOR" &&
+            selected.status !== "COMPLETED" &&
+            selected.status !== "CANCELED" &&
+            (!cancelMode ? (
+              <button
+                type="button"
+                className="wide danger-button"
+                disabled={busy || !!error}
+                onClick={() => setCancelMode(true)}
+              >
+                <Ban size={17} /> Cancelar pedido
+              </button>
+            ) : (
+              <div className="cancellation-form">
+                <strong>Confirmar cancelamento</strong>
+                <p>Esta ação é definitiva e ficará registrada no histórico.</p>
+                <label>
+                  Motivo
+                  <select
+                    aria-label="Motivo do cancelamento"
+                    value={cancelReason}
+                    onChange={(event) =>
+                      setCancelReason(event.target.value as CancellationReason)
+                    }
+                  >
+                    {Object.entries(cancellationReasons).map(([value, label]) => (
+                      <option value={value} key={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Observação interna (opcional)
+                  <textarea
+                    aria-label="Observação interna do cancelamento"
+                    maxLength={500}
+                    value={cancelNote}
+                    onChange={(event) => setCancelNote(event.target.value)}
+                  />
+                </label>
+                <div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() => setCancelMode(false)}
+                  >
+                    Voltar
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-button"
+                    disabled={busy}
+                    onClick={cancelSelectedOrder}
+                  >
+                    Confirmar cancelamento
+                  </button>
+                </div>
+              </div>
+            ))}
         </aside>
       )}
     </div>

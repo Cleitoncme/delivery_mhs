@@ -4,6 +4,10 @@ import { query, withTransaction } from "@/lib/db";
 import { ApiError } from "@/lib/api";
 import { cookieOptions, hashToken, requireAdmin } from "@/lib/admin-auth";
 import { nextOrderStatus } from "@/lib/order-flow";
+import {
+  activeOrderStatuses,
+  type CancellationReason,
+} from "@/lib/order-cancellation";
 import type {
   Order,
   DeliveryOrderStatus,
@@ -23,9 +27,12 @@ const orderSelect = `SELECT jsonb_build_object(
  FROM order_item_options x WHERE x.order_item_id=i.id AND x.tenant_id=o.tenant_id),'[]'::jsonb)) ORDER BY i.id)
  FROM order_items i WHERE i.order_id=o.id AND i.tenant_id=o.tenant_id),'[]'::jsonb),
  'history',COALESCE((SELECT jsonb_agg(jsonb_build_object('status',h.status,'at',h.created_at) ORDER BY h.created_at,h.id)
- FROM order_status_history h WHERE h.order_id=o.id AND h.tenant_id=o.tenant_id),'[]'::jsonb)
+ FROM order_status_history h WHERE h.order_id=o.id AND h.tenant_id=o.tenant_id),'[]'::jsonb),
+ 'cancellation',CASE WHEN oc.order_id IS NULL THEN NULL ELSE jsonb_build_object(
+   'reason',oc.reason,'note',oc.internal_note,'previousStatus',oc.previous_status,'at',oc.created_at) END
 ) AS data FROM orders o JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id
-LEFT JOIN addresses a ON a.id=o.address_id AND a.tenant_id=o.tenant_id`;
+LEFT JOIN addresses a ON a.id=o.address_id AND a.tenant_id=o.tenant_id
+LEFT JOIN order_cancellations oc ON oc.order_id=o.id AND oc.tenant_id=o.tenant_id`;
 
 export async function listAdminOrders(
   page: number,
@@ -106,6 +113,71 @@ export async function advanceOrder(
   return { id, status };
 }
 
+export async function cancelOrder(
+  id: string,
+  input: {
+    expectedStatus: (typeof activeOrderStatuses)[number];
+    reason: CancellationReason;
+    note?: string;
+  },
+) {
+  const session = await requireAdmin(true);
+  await withTransaction(async (client) => {
+    const result = await client.query<{ status: DeliveryOrderStatus }>(
+      "SELECT status FROM orders WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+      [id, session.tenantId],
+    );
+    const order = result.rows[0];
+    if (!order) throw new ApiError(404, "Pedido não encontrado.");
+    if (order.status !== input.expectedStatus)
+      throw new ApiError(
+        409,
+        "O pedido foi atualizado por outro operador. Atualize o painel.",
+      );
+    if (!activeOrderStatuses.includes(order.status as (typeof activeOrderStatuses)[number]))
+      throw new ApiError(409, "Este pedido não pode mais ser cancelado.");
+    await client.query(
+      `INSERT INTO order_cancellations
+       (tenant_id,order_id,previous_status,reason,internal_note,actor_id)
+       VALUES($1,$2,$3,$4,$5,$6)`,
+      [
+        session.tenantId,
+        id,
+        order.status,
+        input.reason,
+        input.note?.trim() || null,
+        session.userId,
+      ],
+    );
+    await client.query(
+      "UPDATE orders SET status='CANCELED',updated_at=now() WHERE id=$1 AND tenant_id=$2",
+      [id, session.tenantId],
+    );
+    await client.query(
+      "INSERT INTO order_status_history(tenant_id,order_id,status,actor_type,actor_id) VALUES($1,$2,'CANCELED','ADMIN',$3)",
+      [session.tenantId, id, session.userId],
+    );
+    await client.query(
+      `INSERT INTO integration_events
+       (tenant_id,aggregate_type,aggregate_id,event_type,payload,idempotency_key)
+       VALUES($1,'ORDER',$2,'ORDER_CANCELED',$3,$4)`,
+      [
+        session.tenantId,
+        id,
+        JSON.stringify({
+          orderId: id,
+          previousStatus: order.status,
+          status: "CANCELED",
+          reason: input.reason,
+          actorId: session.userId,
+        }),
+        randomUUID(),
+      ],
+    );
+  });
+  return { id, status: "CANCELED" as const };
+}
+
 export async function grantOrderAccess(
   slug: string,
   id: string,
@@ -151,6 +223,7 @@ export async function readCustomerOrder(slug: string, id: string) {
     total,
     createdAt,
     history,
+    cancellation,
   } = result.rows[0].data;
   return {
     id: orderId,
@@ -165,5 +238,8 @@ export async function readCustomerOrder(slug: string, id: string) {
     total,
     createdAt,
     history,
+    cancellation: cancellation
+      ? { reason: cancellation.reason, at: cancellation.at }
+      : undefined,
   };
 }
