@@ -1669,6 +1669,17 @@ p {
 .customer-orders small { color:var(--muted); font-size:9px; }
 .customer-pagination { display:flex; align-items:center; justify-content:center; gap:10px; padding:12px 4px 4px; font-size:11px; }
 .customer-pagination .secondary-button { min-height:34px; display:flex; align-items:center; gap:4px; padding:7px 10px; }
+.danger-button { background:var(--danger); color:white; }
+.danger-button:hover { background:#861d1d; }
+.order-drawer>.danger-button { margin-top:10px; }
+.cancellation-form { display:grid; gap:10px; margin-top:12px; padding:14px; border:1px solid #efcaca; border-radius:10px; background:#fff7f7; }
+.cancellation-form>p { margin:0; }
+.cancellation-form label { display:grid; gap:5px; color:var(--muted); font-size:10px; font-weight:700; }
+.cancellation-form select,.cancellation-form textarea { width:100%; border:1px solid var(--line); border-radius:8px; background:white; color:var(--ink); padding:10px; font:inherit; }
+.cancellation-form textarea { min-height:74px; resize:vertical; }
+.cancellation-form>div { display:flex; justify-content:flex-end; gap:8px; }
+.cancellation-summary,.canceled-order { display:grid; gap:4px; margin:12px 0; padding:12px; border-radius:9px; background:#fff0f0; color:var(--danger); }
+.cancellation-summary span,.cancellation-summary small,.canceled-order span { color:#704040; }
 @media (max-width:1100px) {
   .customers-content { grid-template-columns:1fr; }
   .customer-detail { order:-1; }

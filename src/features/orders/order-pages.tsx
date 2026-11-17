@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useApiResource } from "@/lib/use-api-resource";
 import { money } from "@/lib/format";
+import { cancellationReasons } from "@/lib/order-cancellation";
 import type { DeliveryOrderStatus, Tenant, Order } from "@/types/domain";
 type TrackedOrder = Omit<
   Order,
@@ -53,6 +54,7 @@ export function OrderSuccess({ tenant, id }: { tenant: Tenant; id: string }) {
         status={order.status}
         history={order.history}
         fulfillment={order.fulfillmentType}
+        cancellation={order.cancellation}
       />
       <Link className="button wide" href={`/loja/${tenant.slug}/pedido/${id}`}>
         Acompanhar pedido
@@ -106,6 +108,7 @@ export function OrderTracking({ tenant, id }: { tenant: Tenant; id: string }) {
             status={order.status}
             history={order.history}
             fulfillment={order.fulfillmentType}
+            cancellation={order.cancellation}
           />
           <p>O status é atualizado automaticamente a cada 10 segundos.</p>
         </section>
@@ -132,16 +135,28 @@ export function OrderTimeline({
   status,
   history,
   fulfillment = "DELIVERY",
+  cancellation,
 }: {
   status: DeliveryOrderStatus;
   history: { status: DeliveryOrderStatus; at: string }[];
   fulfillment?: Order["fulfillmentType"];
+  cancellation?: Order["cancellation"];
 }) {
   const steps = flow.filter(
     (item) => fulfillment !== "PICKUP" || item !== "OUT_FOR_DELIVERY",
   );
   const current = steps.indexOf(status);
-  if (status === "CANCELED") return <p role="status">Pedido cancelado.</p>;
+  if (status === "CANCELED")
+    return (
+      <div className="canceled-order" role="status">
+        <strong>Pedido cancelado</strong>
+        <span>
+          {cancellation
+            ? cancellationReasons[cancellation.reason]
+            : "Entre em contato com a loja para mais informações."}
+        </span>
+      </div>
+    );
   return (
     <ol className="timeline">
       {steps.map((item, index) => {
