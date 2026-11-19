@@ -16,7 +16,11 @@ export default defineConfig({
     command: "npm run dev",
     url: "http://127.0.0.1:3000",
     reuseExistingServer: false,
-    env: { ADMIN_ENABLED: "true", APP_ORIGIN: "http://127.0.0.1:3000" },
+    env: {
+      ADMIN_ENABLED: "true",
+      APP_ORIGIN: "http://127.0.0.1:3000",
+      TRUST_PROXY: "false",
+    },
     timeout: 120000,
   },
 });

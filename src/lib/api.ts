@@ -5,6 +5,7 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly headers?: HeadersInit,
   ) {
     super(message);
   }
@@ -23,7 +24,10 @@ export function errorResponse(error: unknown) {
       { status: 400 },
     );
   if (error instanceof ApiError)
-    return Response.json({ error: error.message }, { status: error.status });
+    return Response.json(
+      { error: error.message },
+      { status: error.status, headers: error.headers },
+    );
   if (error instanceof DomainError)
     return Response.json(
       { error: error.message, code: error.code },

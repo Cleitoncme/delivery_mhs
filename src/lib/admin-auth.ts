@@ -1,4 +1,5 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
 import { promisify } from "node:util";
 import { cookies } from "next/headers";
 import { query } from "./db";
@@ -13,6 +14,7 @@ export const cookieOptions = {
   secure: process.env.NODE_ENV === "production",
   sameSite: "strict" as const,
   path: "/",
+  priority: "high" as const,
 };
 export type AdminSession = {
   userId: string;
@@ -57,23 +59,53 @@ export async function requireAdmin(write = false) {
     throw new ApiError(403, "Seu perfil permite somente consulta.");
   return session;
 }
+
+type LoginLimitRow = { attempts: number; resets_at: Date };
+
+function trustedClientAddress(request: Request) {
+  if (process.env.TRUST_PROXY !== "true") return null;
+  const candidate =
+    request.headers.get("x-real-ip")?.trim() ||
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim();
+  return candidate && isIP(candidate) ? candidate : null;
+}
+
+async function consumeLoginLimit(key: string, maximum: number) {
+  const result = await query<LoginLimitRow>(
+    `INSERT INTO admin_login_limits(key_hash,attempts,resets_at)
+     VALUES($1,1,now()+interval '15 minutes')
+     ON CONFLICT(key_hash) DO UPDATE SET
+       attempts=CASE WHEN admin_login_limits.resets_at<=now() THEN 1 ELSE admin_login_limits.attempts+1 END,
+       resets_at=CASE WHEN admin_login_limits.resets_at<=now() THEN now()+interval '15 minutes' ELSE admin_login_limits.resets_at END
+     RETURNING attempts,resets_at`,
+    [hashToken(key)],
+  );
+  const limit = result.rows[0];
+  if (limit.attempts > maximum) {
+    const retryAfter = Math.max(
+      1,
+      Math.ceil((limit.resets_at.getTime() - Date.now()) / 1000),
+    );
+    throw new ApiError(429, "Muitas tentativas. Aguarde alguns minutos.", {
+      "Retry-After": String(retryAfter),
+    });
+  }
+}
+
 export async function loginAdmin(
   slug: string,
   email: string,
   password: string,
+  request: Request,
 ) {
   requireAdminEnabled();
-  // Shared in PostgreSQL, so restarting or running a second process cannot reset the limit.
-  for (const key of [`account:${slug}:${email}`, "global"]) {
-    const limit = await query<{ attempts: number }>(
-      `INSERT INTO admin_login_limits(key_hash,attempts,resets_at) VALUES($1,1,now()+interval '15 minutes')
-       ON CONFLICT(key_hash) DO UPDATE SET attempts=CASE WHEN admin_login_limits.resets_at<=now() THEN 1 ELSE admin_login_limits.attempts+1 END,
-       resets_at=CASE WHEN admin_login_limits.resets_at<=now() THEN now()+interval '15 minutes' ELSE admin_login_limits.resets_at END RETURNING attempts`,
-      [hashToken(key)],
-    );
-    if (limit.rows[0].attempts > (key === "global" ? 100 : 10))
-      throw new ApiError(429, "Muitas tentativas. Aguarde 15 minutos.");
-  }
+  // Persisted in PostgreSQL so restarts and additional app instances do not reset it.
+  // There is no system-wide key: an attack against one store cannot lock every tenant.
+  const accountLimitKey = `account:${slug}:${email}`;
+  await consumeLoginLimit(accountLimitKey, 10);
+  const address = trustedClientAddress(request);
+  const addressLimitKey = address ? `address:${address}` : null;
+  if (addressLimitKey) await consumeLoginLimit(addressLimitKey, 100);
   const result = await query<{ id: string; password_hash: string }>(
     `SELECT u.id,u.password_hash FROM admin_users u JOIN tenants t ON t.id=u.tenant_id WHERE t.slug=$1 AND u.email=$2 AND u.active`,
     [slug, email],
@@ -90,6 +122,13 @@ export async function loginAdmin(
     !timingSafeEqual(expected, derived)
   )
     throw new ApiError(401, "Loja, e-mail ou senha inválidos.");
+  // Successful authentication must not consume any failure budget.
+  for (const key of [accountLimitKey, addressLimitKey]) {
+    if (key)
+      await query("DELETE FROM admin_login_limits WHERE key_hash=$1", [
+        hashToken(key),
+      ]);
+  }
   const jar = await cookies();
   const previous = jar.get(sessionCookie)?.value;
   if (previous)
