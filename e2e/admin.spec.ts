@@ -1,5 +1,5 @@
 import { expect as baseExpect, test as base, type APIRequestContext } from "@playwright/test";
-import { randomBytes, randomUUID, scryptSync } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { Pool } from "pg";
 const origin = "http://127.0.0.1:3000";
 // New routes compile on first access in the local Next development server.
@@ -322,8 +322,39 @@ test("entrega percorre todos os estados e usuário desativado perde acesso", asy
 });
 test("login limita tentativas sem emitir sessão", async ({ request, shop }) => {
   for (let i=0; i<11; i++) {
-    const response = await request.post("/api/admin/session", { headers: { Origin: origin }, data: { slug: shop.slug, email: shop.email, password: "incorreta" } });
+    const spoofedAddress = `203.0.113.${i + 1}`;
+    const response = await request.post("/api/admin/session", { headers: { Origin: origin, "X-Forwarded-For": spoofedAddress }, data: { slug: shop.slug, email: shop.email, password: "incorreta" } });
     expect(response.status()).toBe(i === 10 ? 429 : 401);
     expect(response.headers()["set-cookie"]).toBeUndefined();
+    if (i === 10) expect(Number(response.headers()["retry-after"])).toBeGreaterThan(0);
   }
+  const spoofedHashes = Array.from({ length: 11 }, (_, index) =>
+    createHash("sha256")
+      .update(`address:203.0.113.${index + 1}`)
+      .digest("hex"),
+  );
+  const trustedAddressLimits = await shop.pool.query(
+    "SELECT count(*)::int total FROM admin_login_limits WHERE key_hash::text=ANY($1::text[])",
+    [spoofedHashes],
+  );
+  expect(trustedAddressLimits.rows[0].total).toBe(0);
+});
+
+test("login válido gira a sessão sem consumir o limite da conta", async ({ request, shop }) => {
+  for (let i = 0; i < 11; i++) {
+    const response = await request.post("/api/admin/session", {
+      headers: { Origin: origin },
+      data: { slug: shop.slug, email: shop.email, password: shop.password },
+    });
+    expect(response.status()).toBe(200);
+    const cookie = response.headers()["set-cookie"] ?? "";
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toMatch(/SameSite=Strict/i);
+    expect(cookie).toContain("Path=/");
+  }
+  const sessions = await shop.pool.query(
+    "SELECT count(*)::int total FROM admin_sessions WHERE user_id=$1",
+    [shop.userId],
+  );
+  expect(sessions.rows[0].total).toBe(1);
 });

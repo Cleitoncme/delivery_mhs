@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   try {
     requireSameOrigin(request);
     const input = schema.parse(await jsonRequest(request));
-    await loginAdmin(input.slug, input.email, input.password);
+    await loginAdmin(input.slug, input.email, input.password, request);
     return Response.json(
       { ok: true },
       { headers: { "Cache-Control": "no-store" } },
