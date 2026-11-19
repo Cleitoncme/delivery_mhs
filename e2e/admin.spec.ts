@@ -18,7 +18,7 @@ const test = base.extend<{ shop: Shop }>({
       await provide({ slug, tenantId, productId, email, password, userId, pool });
     } finally {
       // Remove exclusively the tenant UUID allocated by this test.
-      for (const table of ["integration_events","order_access","order_status_history","order_item_options","order_items","orders","addresses","customers"])
+      for (const table of ["integration_events","order_access","order_cancellations","order_status_history","order_item_options","order_items","orders","addresses","customers"])
         await pool.query(`DELETE FROM ${table} WHERE tenant_id=$1`, [tenantId]);
       await pool.query("DELETE FROM admin_users WHERE id=$1", [userId]);
       for (const table of ["products","categories"]) await pool.query(`DELETE FROM ${table} WHERE tenant_id=$1`, [tenantId]);
@@ -123,6 +123,44 @@ test("dashboard calcula métricas da loja e protege os filtros", async ({ page, 
   await expect(page.getByText("1 pedidos ativos", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Abrir painel de pedidos →" })).toBeVisible();
 });
+test("clientes exibe contatos, métricas e histórico somente da loja", async ({ page, shop }) => {
+  const completed = await order(page.request, shop);
+  await order(page.request, shop, "DELIVERY");
+  await login(page.request, shop);
+  const change = (expectedStatus: string, status: string) =>
+    page.request.patch(`/api/admin/pedidos/${completed.id}/status`, {
+      headers: { Origin: origin },
+      data: { expectedStatus, status },
+    });
+  for (const [from, to] of [["NEW", "PREPARING"], ["PREPARING", "READY"], ["READY", "COMPLETED"]])
+    expect((await change(from, to)).status()).toBe(200);
+
+  const listResponse = await page.request.get("/api/admin/clientes?q=Cliente%20Teste");
+  expect(listResponse.status()).toBe(200);
+  const list = await listResponse.json();
+  expect(list.customers).toHaveLength(1);
+  expect(list.customers[0]).toMatchObject({
+    name: "Cliente Teste",
+    phone: "49999999999",
+    orderCount: 2,
+    completedOrders: 1,
+    totalSpent: 1000,
+  });
+  const customerId = list.customers[0].id as string;
+  const detail = await (await page.request.get(`/api/admin/clientes/${customerId}`)).json();
+  expect(detail.orders).toHaveLength(2);
+  expect(detail.addresses).toHaveLength(1);
+  expect(detail.summary).toMatchObject({ orderCount: 2, completedOrders: 1, totalSpent: 1000, averageTicket: 1000 });
+  expect((await page.request.get("/api/admin/clientes/00000000-0000-4000-8000-000000000000")).status()).toBe(404);
+
+  await page.goto("/admin/clientes");
+  await expect(page.getByRole("heading", { name: "Clientes", exact: true })).toBeVisible();
+  await page.getByPlaceholder("Buscar por nome, telefone ou e-mail").fill("49999999999");
+  await page.getByRole("button", { name: /Cliente Teste/ }).click();
+  await expect(page.getByRole("heading", { name: "Cliente Teste" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Histórico de pedidos" })).toBeVisible();
+  await expect(page.locator(".customer-detail").getByText("R$ 10,00", { exact: true }).first()).toBeVisible();
+});
 test("kanban bloqueia novos e avança apenas para a próxima etapa", async ({ page, shop }, testInfo) => {
   const created = await order(page.request, shop);
   await login(page.request, shop);
@@ -154,17 +192,55 @@ test("kanban bloqueia novos e avança apenas para a próxima etapa", async ({ pa
     ready.getByRole("button", { name: new RegExp(`#${created.number}`) }),
   ).toBeVisible();
 });
+test("operador cancela pedido com auditoria e cliente vê apenas o motivo público", async ({ page, shop }) => {
+  const created = await order(page.request, shop);
+  await login(page.request, shop);
+  await page.goto("/admin/pedidos");
+  await page.getByRole("button", { name: new RegExp(`#${created.number}`) }).click();
+  await page.getByRole("button", { name: "Cancelar pedido" }).click();
+  await page.getByLabel("Motivo do cancelamento").selectOption("CUSTOMER_REQUEST");
+  await page.getByLabel("Observação interna do cancelamento").fill("Solicitação confirmada por telefone.");
+  await page.getByRole("button", { name: "Confirmar cancelamento" }).click();
+
+  await expect.poll(async () => (await shop.pool.query("SELECT status FROM orders WHERE id=$1", [created.id])).rows[0]?.status).toBe("CANCELED");
+  const audit = await shop.pool.query(
+    "SELECT previous_status,reason,internal_note,actor_id FROM order_cancellations WHERE order_id=$1",
+    [created.id],
+  );
+  expect(audit.rows).toEqual([{
+    previous_status: "NEW",
+    reason: "CUSTOMER_REQUEST",
+    internal_note: "Solicitação confirmada por telefone.",
+    actor_id: shop.userId,
+  }]);
+  expect((await shop.pool.query("SELECT status,actor_id FROM order_status_history WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1", [created.id])).rows[0]).toEqual({ status: "CANCELED", actor_id: shop.userId });
+  expect((await shop.pool.query("SELECT event_type FROM integration_events WHERE aggregate_id=$1 AND event_type='ORDER_CANCELED'", [created.id])).rows).toEqual([{ event_type: "ORDER_CANCELED" }]);
+
+  const tracking = await page.request.get(`/api/v1/lojas/${shop.slug}/pedidos/${created.id}`);
+  expect(tracking.status()).toBe(200);
+  const publicOrder = await tracking.json();
+  expect(publicOrder.cancellation).toEqual({ reason: "CUSTOMER_REQUEST", at: expect.any(String) });
+  expect(JSON.stringify(publicOrder)).not.toContain("Solicitação confirmada");
+  const repeated = await page.request.post(`/api/admin/pedidos/${created.id}/cancelamento`, {
+    headers: { Origin: origin },
+    data: { expectedStatus: "NEW", reason: "OTHER" },
+  });
+  expect(repeated.status()).toBe(409);
+});
 test("API bloqueia anônimo, origem externa, consulta e sessão expirada", async ({ request, shop }) => {
   expect((await request.get("/api/admin/pedidos")).status()).toBe(401);
   expect((await request.get("/api/admin/dashboard")).status()).toBe(401);
+  expect((await request.get("/api/admin/clientes")).status()).toBe(401);
   const created = await order(request, shop);
   await login(request, shop);
   const path = `/api/admin/pedidos/${created.id}/status`, data = { expectedStatus: "NEW", status: "PREPARING" };
+  const cancellationPath = `/api/admin/pedidos/${created.id}/cancelamento`;
   expect((await request.patch(path, { data, headers: { Origin: "https://externo.example" } })).status()).toBe(403);
   expect((await request.patch(path, { data })).status()).toBe(403);
   await shop.pool.query("UPDATE admin_users SET role='VIEWER' WHERE id=$1", [shop.userId]);
   expect((await request.get("/api/admin/pedidos")).status()).toBe(200);
   expect((await request.patch(path, { data, headers: { Origin: origin } })).status()).toBe(403);
+  expect((await request.post(cancellationPath, { data: { expectedStatus: "NEW", reason: "OTHER" }, headers: { Origin: origin } })).status()).toBe(403);
   await shop.pool.query("UPDATE admin_sessions SET expires_at=now()-interval '1 second' WHERE user_id=$1", [shop.userId]);
   expect((await request.get("/api/admin/pedidos")).status()).toBe(401);
 });
@@ -209,10 +285,13 @@ test("acompanhamento exige cookie e administrador só acessa sua loja", async ({
     expect(await own.json()).not.toHaveProperty("customer");
     expect((await request.get(`/api/v1/lojas/mhs-mercado/pedidos/${created.id}`)).status()).toBe(404);
     await login(request, shop);
+    const ownCustomers = await (await request.get("/api/admin/clientes")).json();
+    const ownCustomerId = ownCustomers.customers[0].id as string;
     const otherId = (await shop.pool.query("SELECT id FROM tenants WHERE slug='mhs-mercado'")).rows[0].id;
     await shop.pool.query("UPDATE admin_users SET tenant_id=$1 WHERE id=$2", [otherId, shop.userId]);
     const list = await (await request.get("/api/admin/pedidos")).json();
     expect(list.orders.every((item: { tenantId: string }) => item.tenantId === otherId)).toBe(true);
+    expect((await request.get(`/api/admin/clientes/${ownCustomerId}`)).status()).toBe(404);
     expect((await request.patch(`/api/admin/pedidos/${created.id}/status`, { headers: { Origin: origin }, data: { expectedStatus: "NEW", status: "PREPARING" } })).status()).toBe(404);
   } finally { await stranger.dispose(); }
 });
